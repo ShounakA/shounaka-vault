@@ -1,0 +1,54 @@
+#!/usr/bin/env ruby
+require 'shounak/runner'
+require 'date'
+
+# Main module to run
+module Main
+  class << self
+    attr_accessor :donowall_backup_base, :max_backups
+  end
+  self.donowall_backup_base = 'donowall_backup'.freeze
+  def self.clean_up_old_backups(logger, runner)
+    logger.info('Starting clean up')
+
+    backups = Dir.glob("/home/artemis/#{self.donowall_backup_base}/#{self.donowall_backup_base}_*.tar.gz")
+    backups = backups.sort { |x,y| y <=> x }
+    if backups.count > max_backups
+      to_del = backups.slice(0, max_backups)
+      to_del.each { |backup_file| puts backup_file }
+    else
+      logger.info('Did not reach max backup count. no deletes')
+    end
+  end
+
+  def self.get_backup_files(logger, runner)
+    date = DateTime.now()
+    donowall_backup_dir = "#{donowall_backup_base}_#{date}".gsub(':', '-')
+
+    logger.info("Creating DonoWall backup folder: #{donowall_backup_dir}")
+    Dir.mkdir("/home/artemis/donowall_backup/#{donowall_backup_dir}")
+
+    logger.info("Copying over files from DonoWall to #{donowall_backup_dir}")
+    runner.run("scp -r -i ~/.ssh/donowall root@159.203.15.30:/vw-data/ /home/artemis/#{donowall_backup_base}/#{donowall_backup_dir}/vw-data/")
+    runner.run("scp -r -i ~/.ssh/donowall root@159.203.15.30:/opt/nginxproxymanager/data/ /home/artemis/#{donowall_backup_base}/#{donowall_backup_dir}/nginx-data/")
+    runner.run("scp -r -i ~/.ssh/donowall root@159.203.15.30:/opt/nginxproxymanager/letsencrypt/ /home/artemis/#{donowall_backup_base}/#{donowall_backup_dir}/letsencrypt-data/")
+
+    logger.info('Compressing backup files')
+    runner.run("tar -czf /home/artemis/#{donowall_backup_base}/#{donowall_backup_dir}.tar.gz /home/artemis/#{donowall_backup_base}/#{donowall_backup_dir}")
+
+    logger.info('Removing folders')
+    runner.run("rm -Rf /home/artemis/#{donowall_backup_base}/#{donowall_backup_dir}/")
+
+    logger.info('Backup complete.')
+  end
+
+  private 
+  self.max_backups = 10
+end
+
+
+logger = Logger.new(STDOUT)
+runner = Shounak::Runner.new(logger: logger)
+
+Main.get_backup_files(logger, runner)
+Main.clean_up_old_backups(logger, runner)
